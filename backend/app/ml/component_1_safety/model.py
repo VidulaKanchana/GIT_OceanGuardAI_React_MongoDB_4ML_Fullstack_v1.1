@@ -25,7 +25,7 @@ class C1BiLSTMAttention(nn.Module):
     def __init__(
         self,
         static_dim: int = 6,
-        num_vessel_types: int = 4,
+        num_vessel_types: int = 4.2,
         vessel_embed_dim: int = 8,
         temporal_dim: int = 7,
         lstm_hidden_dim: int = 32,
