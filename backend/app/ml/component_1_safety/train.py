@@ -124,7 +124,7 @@ def train_c1(epochs: int = 15, batch_size: int = 64, lr: float = 0.001):
         model.eval()
         val_loss = 0.0
         val_correct = 0
-        val_total = 0.0
+        val_total = 0
         val_dri_mae = 0.0
 
         with torch.no_grad():
