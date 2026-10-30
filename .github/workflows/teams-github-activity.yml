@@ -1,3 +1,35 @@
+
+name: OceanGuard AI - GitHub Activity to Teams
+
+on:
+  push:
+    branches:
+      - '**'
+
+  pull_request:
+    types: [opened, reopened, closed]
+
+  issues:
+    types: [opened]
+
+  create:
+
+  release:
+    types: [published]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify-teams:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Professional Adaptive Card to Teams
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
 
@@ -41,7 +73,7 @@
           add("Repository", repo)
 
           # ===================================
-          # 1. NEW COMMITS / PUSH
+          # 1. COMMITS / PUSH
           # ===================================
           if name == "push":
               if event.get("deleted"):
@@ -147,7 +179,7 @@
               url = repo_url + "/tree/" + quote(branch, safe="/")
 
           # ===================================
-          # 5. NEW RELEASE
+          # 5. RELEASE
           # ===================================
           elif name == "release":
               release = event["release"]
@@ -158,3 +190,211 @@
 
               add("Release", release.get("name"))
               add("Tag", release.get("tag_name"))
+              add("Author", release.get("author", {}).get("login"))
+              add("Published", date(release.get("published_at")))
+
+              url = release.get("html_url") or repo_url
+
+          # ===================================
+          # 6. MANUAL TEST
+          # ===================================
+          elif name == "workflow_dispatch":
+              title = "OceanGuard AI Test Notification"
+              subtitle = "GitHub Actions webhook test successful"
+              color = "Good"
+
+              add("Status", "✅ Test Run")
+              add("Timestamp", datetime.now(timezone.utc).isoformat())
+
+              url = repo_url + "/actions"
+
+          else:
+              print("Unsupported event:", name)
+              raise SystemExit(0)
+
+          # ===================================
+          # 7. ICONS AND HEADINGS
+          # ===================================
+          icons = {
+              "Repository": "📦",
+              "Branch": "🌿",
+              "Pushed By": "👤",
+              "Commit Count": "📊",
+              "Latest Commit": "🔖",
+              "Message": "📝",
+              "Title": "📑",
+              "PR Number": "🆔",
+              "Author": "👤",
+              "Status": "📊",
+              "Source Branch": "🌿",
+              "Target Branch": "🎯",
+              "Created": "📅",
+              "Last Updated": "🔄",
+              "Merged By": "👤",
+              "Merged At": "✅",
+              "Issue Number": "🟡",
+              "Created By": "👤",
+              "Default Branch": "🌳",
+              "Release": "🚀",
+              "Tag": "🏷️",
+              "Published": "📅",
+              "Timestamp": "🕒"
+          }
+
+          titles = {
+              "New Commits Pushed": "🟢 New Commits Pushed",
+              "New Pull Request": "🔵 New Pull Request",
+              "Pull Request Merged": "✅ Pull Request Merged",
+              "Pull Request Closed": "🔴 Pull Request Closed",
+              "New Branch Created": "🌿 New Branch Created",
+              "New Issue Created": "🟡 New Issue Created",
+              "New Release Published": "🚀 New Release Published",
+              "OceanGuard AI Test Notification": "✅ OceanGuard AI Test Notification"
+          }
+
+          # ===================================
+          # 8. FIXED COLUMN ALIGNMENT
+          # ===================================
+          rows = []
+
+          for item in facts:
+              key = item["title"]
+              value = str(item["value"])
+              symbol = icons.get(key, "📌")
+
+              # Long values: full-width layout
+              if key in ("Repository", "Message", "Title"):
+                  rows.append({
+                      "type": "Container",
+                      "spacing": "Medium",
+                      "items": [
+                          {
+                              "type": "TextBlock",
+                              "text": f"{symbol}  **{key}**",
+                              "wrap": True,
+                              "spacing": "None"
+                          },
+                          {
+                              "type": "TextBlock",
+                              "text": value,
+                              "wrap": True,
+                              "spacing": "Small"
+                          }
+                      ]
+                  })
+
+              # Short values: aligned columns
+              else:
+                  rows.append({
+                      "type": "ColumnSet",
+                      "spacing": "Small",
+                      "columns": [
+                          {
+                              "type": "Column",
+                              "width": "auto",
+                              "items": [{
+                                  "type": "TextBlock",
+                                  "text": f"{symbol}  {key}",
+                                  "weight": "Bolder",
+                                  "wrap": False
+                              }]
+                          },
+                          {
+                              "type": "Column",
+                              "width": "stretch",
+                              "items": [{
+                                  "type": "TextBlock",
+                                  "text": value,
+                                  "wrap": True
+                              }]
+                          }
+                      ]
+                  })
+
+          # ===================================
+          # 9. CREATE ADAPTIVE CARD
+          # ===================================
+          card = {
+              "type": "message",
+              "attachments": [{
+                  "contentType": "application/vnd.microsoft.card.adaptive",
+                  "contentUrl": None,
+                  "content": {
+                      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                      "type": "AdaptiveCard",
+                      "version": "1.2",
+                      "body": [
+                          {
+                              "type": "TextBlock",
+                              "text": titles.get(title, title),
+                              "size": "Large",
+                              "weight": "Bolder",
+                              "color": color,
+                              "wrap": True
+                          },
+                          {
+                              "type": "TextBlock",
+                              "text": subtitle,
+                              "weight": "Bolder",
+                              "wrap": True,
+                              "spacing": "Medium"
+                          },
+                          {
+                              "type": "Container",
+                              "spacing": "Medium",
+                              "items": rows
+                          },
+                          {
+                              "type": "TextBlock",
+                              "text": "Automatically generated by OceanGuard AI GitHub Actions",
+                              "size": "Small",
+                              "isSubtle": True,
+                              "wrap": True,
+                              "separator": True,
+                              "spacing": "Medium"
+                          }
+                      ],
+                      "actions": [{
+                          "type": "Action.OpenUrl",
+                          "title": "View on GitHub",
+                          "url": url
+                      }]
+                  }
+              }]
+          }
+
+          # ===================================
+          # 10. SEND TO MICROSOFT TEAMS
+          # ===================================
+          payload = json.dumps(
+              card,
+              ensure_ascii=False
+          ).encode("utf-8")
+
+          request = urllib.request.Request(
+              webhook,
+              data=payload,
+              headers={
+                  "Content-Type": "application/json"
+              },
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(
+                  request,
+                  timeout=30
+              ) as response:
+                  print("Teams webhook status:", response.status)
+                  print("Event:", name)
+                  print("Notification:", title)
+
+          except urllib.error.HTTPError as error:
+              print("Teams webhook HTTP error:", error.code)
+              print(
+                  error.read()
+                  .decode("utf-8", errors="replace")[:1000]
+              )
+              raise
+
+          PY
