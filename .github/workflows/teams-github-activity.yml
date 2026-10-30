@@ -25,13 +25,14 @@ permissions:
 jobs:
   notify-teams:
     runs-on: ubuntu-latest
+
     steps:
       - name: Send Adaptive Card to Teams
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
-          EVENT_PATH: ${{ github.event_path }}
+
         run: |
           python3 - <<'PY'
           import json
@@ -39,12 +40,14 @@ jobs:
           import urllib.request
           import urllib.error
           from datetime import datetime, timezone
+          from urllib.parse import quote
 
           webhook = os.environ.get("TEAMS_WEBHOOK_URL")
           if not webhook:
               raise RuntimeError("TEAMS_WEBHOOK_URL secret is missing")
 
-          with open(os.environ["EVENT_PATH"], encoding="utf-8") as f:
+          # FIX: Use GitHub Actions' built-in event file path
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
               event = json.load(f)
 
           name = os.environ["EVENT_NAME"]
@@ -70,17 +73,20 @@ jobs:
 
           add("Repository", repo)
 
+          # 1. COMMITS / PUSH
           if name == "push":
+              if event.get("deleted"):
+                  print("Deleted ref: skipping notification")
+                  raise SystemExit(0)
+
               branch = event.get("ref", "").replace("refs/heads/", "")
               commits = event.get("commits", [])
               head = event.get("head_commit") or {}
-              if event.get("deleted"):
-                  print("Deleted ref: skipping push notification")
-                  raise SystemExit(0)
 
               title = "New Commits Pushed"
               subtitle = f"{len(commits)} commit(s) pushed to {branch}"
               color = "Good"
+
               add("Branch", branch)
               add("Pushed By", event.get("pusher", {}).get("name"))
               add("Commit Count", len(commits))
@@ -92,6 +98,7 @@ jobs:
               else:
                   url = event.get("compare") or repo_url
 
+          # 2. PULL REQUESTS
           elif name == "pull_request":
               pr = event["pull_request"]
               action = event["action"]
@@ -102,11 +109,13 @@ jobs:
                   subtitle = f"Pull request #{pr['number']} has been merged"
                   color = "Good"
                   status = "Merged"
+
               elif action == "closed":
                   title = "Pull Request Closed"
                   subtitle = f"Pull request #{pr['number']} closed without merge"
                   color = "Attention"
                   status = "Closed"
+
               else:
                   title = "New Pull Request"
                   subtitle = f"Pull request #{pr['number']} is open"
@@ -128,54 +137,74 @@ jobs:
 
               url = pr.get("html_url") or repo_url
 
+          # 3. NEW ISSUES
           elif name == "issues":
               issue = event["issue"]
+
               title = "New Issue Created"
               subtitle = f"Issue #{issue['number']} has been opened"
               color = "Warning"
+
               add("Issue Number", issue.get("number"))
               add("Title", issue.get("title"))
               add("Author", issue.get("user", {}).get("login"))
               add("Status", "Open")
               add("Created", date(issue.get("created_at")))
+
               url = issue.get("html_url") or repo_url
 
+          # 4. NEW BRANCH
           elif name == "create":
               if event.get("ref_type") != "branch":
                   print("Not a branch creation; skipping")
                   raise SystemExit(0)
+
               branch = event.get("ref", "")
+
               title = "New Branch Created"
               subtitle = f"Branch {branch} created"
               color = "Accent"
+
               add("Branch", branch)
               add("Created By", event.get("sender", {}).get("login"))
               add("Default Branch", event.get("master_branch"))
-              url = repo_url + "/tree/" + branch
 
+              url = repo_url + "/tree/" + quote(branch, safe="/")
+
+          # 5. NEW RELEASE
           elif name == "release":
               release = event["release"]
+
               title = "New Release Published"
               subtitle = release.get("name") or release.get("tag_name", "")
               color = "Good"
+
               add("Release", release.get("name"))
               add("Tag", release.get("tag_name"))
               add("Author", release.get("author", {}).get("login"))
               add("Published", date(release.get("published_at")))
+
               url = release.get("html_url") or repo_url
 
+          # 6. MANUAL TEST
           elif name == "workflow_dispatch":
               title = "OceanGuard AI Test Notification"
               subtitle = "GitHub Actions webhook test successful"
               color = "Good"
+
               add("Status", "Test Run")
-              add("Timestamp", datetime.now(timezone.utc).isoformat())
+              add(
+                  "Timestamp",
+                  datetime.now(timezone.utc).isoformat()
+              )
+
               url = repo_url + "/actions"
 
           else:
               print("Unsupported event:", name)
               raise SystemExit(0)
 
+          # CREATE MICROSOFT TEAMS ADAPTIVE CARD
           card = {
               "type": "message",
               "attachments": [{
@@ -221,21 +250,36 @@ jobs:
               }]
           }
 
-          payload = json.dumps(card, ensure_ascii=False).encode("utf-8")
+          payload = json.dumps(
+              card,
+              ensure_ascii=False
+          ).encode("utf-8")
+
           request = urllib.request.Request(
               webhook,
               data=payload,
-              headers={"Content-Type": "application/json"},
+              headers={
+                  "Content-Type": "application/json"
+              },
               method="POST"
           )
 
+          # SEND NOTIFICATION TO MICROSOFT TEAMS
           try:
-              with urllib.request.urlopen(request, timeout=30) as response:
+              with urllib.request.urlopen(
+                  request,
+                  timeout=30
+              ) as response:
                   print("Teams webhook status:", response.status)
                   print("Event:", name)
                   print("Notification:", title)
+
           except urllib.error.HTTPError as error:
               print("Teams webhook HTTP error:", error.code)
-              print(error.read().decode("utf-8", errors="replace")[:1000])
+              print(
+                  error.read()
+                  .decode("utf-8", errors="replace")[:1000]
+              )
               raise
+
           PY
